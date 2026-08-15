@@ -1,0 +1,423 @@
+    85→  const [newP, setNewP] = useState('')
+    86→  const [newR, setNewR] = useState('pengguna')
+    87→  const [creating, setCreating] = useState(false)
+    88→  const [activities, setActivities] = useState<Array<{ id: string; type: string; title: string; createdAt: string }>>([])
+    89→  const [actLoad, setActLoad] = useState(false)
+    90→  const endRef = useRef<HTMLDivElement>(null)
+    91→  const fileRef = useRef<HTMLInputElement>(null)
+    92→  const { theme, setTheme } = useTheme()
+    93→
+    94→  const api = async (url: string, opts: RequestInit = {}) => {
+    95→    const h: Record<string, string> = { ...(opts.headers as Record<string, string> || {}) }
+    96→    if (token) h['Authorization'] = 'Bearer ' + token
+    97→    if (opts.body && !(opts.body instanceof FormData)) h['Content-Type'] = 'application/json'
+    98→    const res = await fetch(url, { ...opts, headers: h })
+    99→    if (!res.ok) { const e = await res.json().catch(() => ({ error: 'Gagal' })); throw new Error(e.error || 'Gagal') }
+   100→    return res.json()
+   101→  }
+   102→
+   103→  const login = async (u: string, p: string) => {
+   104→    const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: u, password: p }) })
+   105→    if (!res.ok) return null
+   106→    return res.json()
+   107→  }
+   108→
+   109→  useEffect(() => {
+   110→    ;(async () => {
+   111→      try { await fetch('/api/seed', { method: 'POST' }) } catch { /* */ }
+   112→      const data = await login('admin', 'admin123')
+   113→      if (data?.token) {
+   114→        setToken(data.token)
+   115→        setUser(data.user)
+   116→      }
+   117→      setInitLoad(false)
+   118→    })()
+   119→  }, [])
+   120→
+   121→  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
+   122→
+   123→  const fetchDash = async () => {
+   124→    setActLoad(true); setBooksLoad(true); setChatsLoad(true)
+   125→    try {
+   126→      const [b, c, a] = await Promise.allSettled([api('/api/books'), api('/api/chat'), api('/api/activities?limit=20')])
+   127→      if (b.status === 'fulfilled') setBooks(b.value.books || [])
+   128→      if (c.status === 'fulfilled') setChats(Array.isArray(c.value) ? c.value : [])
+   129→      if (a.status === 'fulfilled') setActivities(a.value.activities || [])
+   130→    } catch { /* */ }
+   131→    setActLoad(false); setBooksLoad(false); setChatsLoad(false)
+   132→  }
+   133→
+   134→  const fetchBooks = async (q?: string) => {
+   135→    setBooksLoad(true)
+   136→    try {
+   137→      const url = q ? `/api/books?q=${encodeURIComponent(q)}` : '/api/books'
+   138→      const d = await api(url); setBooks(d.books || [])
+   139→    } catch (e: unknown) { toast.error((e as Error).message) }
+   140→    setBooksLoad(false)
+   141→  }
+   142→
+   143→  const fetchChats = async () => {
+   144→    setChatsLoad(true)
+   145→    try { const d = await api('/api/chat'); setChats(Array.isArray(d) ? d : []) }
+   146→    catch (e: unknown) { toast.error((e as Error).message) }
+   147→    setChatsLoad(false)
+   148→  }
+   149→
+   150→  const fetchMsgs = async (id: string) => {
+   151→    setMsgsLoad(true); setSelChat(id)
+   152→    try {
+   153→      const d = await api(`/api/chat?id=${id}`)
+   154→      setChatTitle(d.title || 'Percakapan'); setMsgs(d.messages || [])
+   155→    } catch (e: unknown) { toast.error((e as Error).message) }
+   156→    setMsgsLoad(false)
+   157→  }
+   158→
+   159→  useEffect(() => {
+   160→    if (!token) return
+   161→    const fn = async () => {
+   162→      if (page === 'dashboard') await fetchDash()
+   163→      else if (page === 'library') await fetchBooks()
+   164→      else if (page === 'chat') await fetchChats()
+   165→      else if (page === 'summary' || page === 'quiz') await fetchBooks()
+   166→    }
+   167→    fn()
+   168→  }, [page, token])
+   169→
+   170→  const doLogin = async (e: FormEvent) => {
+   171→    e.preventDefault()
+   172→    if (!loginU.trim() || !loginP.trim()) { toast.error('Masukkan username dan password'); return }
+   173→    setLoginLoad(true)
+   174→    try {
+   175→      const d = await login(loginU, loginP)
+   176→      if (d?.token) { setToken(d.token); setUser(d.user); toast.success('Berhasil masuk!') }
+   177→      else toast.error('Username atau password salah')
+   178→    } catch { toast.error('Login gagal') }
+   179→    setLoginLoad(false)
+   180→  }
+   181→
+   182→  const doLogout = () => { setToken(null); setUser(null); setPage('dashboard'); setSelChat(null); setMsgs([]); setChats([]); toast.success('Berhasil keluar') }
+   183→
+   184→  const doUpload = async () => {
+   185→    if (!upFile || !upTitle.trim()) { toast.error('Pilih file dan masukkan judul'); return }
+   186→    setUploading(true)
+   187→    try {
+   188→      const fd = new FormData(); fd.append('file', upFile); fd.append('title', upTitle); if (upAuthor) fd.append('author', upAuthor)
+   189→      await api('/api/books/upload', { method: 'POST', body: fd })
+   190→      toast.success('Buku berhasil diupload!'); setUploadOpen(false); setUpTitle(''); setUpAuthor(''); setUpFile(null); fetchBooks()
+   191→    } catch (e: unknown) { toast.error((e as Error).message) }
+   192→    setUploading(false)
+   193→  }
+   194→
+   195→  const doDeleteBook = async (id: string) => {
+   196→    try { await api(`/api/books/delete?id=${id}`, { method: 'DELETE' }); toast.success('Buku dihapus'); setBooks(p => p.filter(b => b.id !== id)) }
+   197→    catch (e: unknown) { toast.error((e as Error).message) }
+   198→  }
+   199→
+   200→  const doNewChat = async () => {
+   201→    try {
+   202→      const d = await api('/api/chat/create', { method: 'POST', body: JSON.stringify({ title: 'Percakapan Baru' }) })
+   203→      const nc = { id: d.id, title: d.title, createdAt: d.createdAt, _count: { messages: 0 } }
+   204→      setChats(p => [nc, ...p]); setSelChat(nc.id); setChatTitle(nc.title); setMsgs([]); setSidebarOpen(false)
+   205→    } catch (e: unknown) { toast.error((e as Error).message) }
+   206→  }
+   207→
+   208→  const doSend = async () => {
+   209→    if (!chatIn.trim() || !selChat || sending) return
+   210→    const m = chatIn.trim(); setChatIn(''); setSending(true)
+   211→    setMsgs(p => [...p, { id: 't' + Date.now(), role: 'user', content: m, references: null, createdAt: new Date().toISOString() }])
+   212→    try {
+   213→      const d = await api('/api/chat/send', { method: 'POST', body: JSON.stringify({ chatId: selChat, message: m }) })
+   214→      setMsgs(p => [...p, { id: d.id, role: 'assistant', content: d.content, references: d.references ? JSON.stringify(d.references) : null, createdAt: d.createdAt || new Date().toISOString() }])
+   215→      setChats(p => p.map(c => c.id === selChat ? { ...c, _count: { messages: (c._count?.messages || 0) + 2 } } : c))
+   216→    } catch (e: unknown) { toast.error((e as Error).message); setMsgs(p => p.slice(0, -1)) }
+   217→    setSending(false)
+   218→  }
+   219→
+   220→  const doSearch = async () => {
+   221→    if (!searchQ.trim()) return
+   222→    setSearching(true); setSearched(true)
+   223→    try { const d = await api(`/api/search?q=${encodeURIComponent(searchQ)}`); setSearchRes(d.results || []) }
+   224→    catch (e: unknown) { toast.error((e as Error).message); setSearchRes([]) }
+   225→    setSearching(false)
+   226→  }
+   227→
+   228→  const doSummary = async () => {
+   229→    if (!sumBook) { toast.error('Pilih buku'); return }
+   230→    setSumLoad(true); setSumResult('')
+   231→    try { const d = await api('/api/summary', { method: 'POST', body: JSON.stringify({ bookId: sumBook }) }); setSumResult(d.summary || JSON.stringify(d)); toast.success('Ringkasan dibuat!') }
+   232→    catch (e: unknown) { toast.error((e as Error).message) }
+   233→    setSumLoad(false)
+   234→  }
+   235→
+   236→  const doQuiz = async () => {
+   237→    if (!qBook) { toast.error('Pilih buku'); return }
+   238→    setQLoad(true); setQResult('')
+   239→    try { const d = await api('/api/quiz', { method: 'POST', body: JSON.stringify({ bookId: qBook, type: qType, count: parseInt(qCount), difficulty: qDiff }) }); setQResult(d.quiz || JSON.stringify(d)); toast.success('Soal dibuat!') }
+   240→    catch (e: unknown) { toast.error((e as Error).message) }
+   241→    setQLoad(false)
+   242→  }
+   243→
+   244→  const doCreateUser = async () => {
+   245→    if (!newU.trim() || !newP.trim()) { toast.error('Masukkan username dan password'); return }
+   246→    setCreating(true)
+   247→    try { await api('/api/auth/register', { method: 'POST', body: JSON.stringify({ username: newU, password: newP, role: newR }) }); toast.success(`Pengguna "${newU}" dibuat!`); setNewU(''); setNewP('') }
+   248→    catch (e: unknown) { toast.error((e as Error).message) }
+   249→    setCreating(false)
+   250→  }
+   251→
+   252→  const parseRefs = (r: string | null): Ref[] => {
+   253→    if (!r) return []
+   254→    try { return JSON.parse(r) } catch { return [] }
+   255→  }
+   256→
+   257→  const toggleRef = (id: string) => setExpRefs(p => ({ ...p, [id]: !p[id] }))
+   258→
+   259→  // ==================== SIDEBAR ====================
+   260→  const sidebar = (
+   261→    <div className="flex flex-col h-full">
+   262→      <div className="flex items-center gap-3 px-4 py-5 border-b border-slate-700/50">
+   263→        <div className="w-9 h-9 rounded-lg bg-emerald-500/20 flex items-center justify-center"><BookOpen className="h-5 w-5 text-emerald-400" /></div>
+   264→        <span className="text-lg font-bold text-white">AI Library Tutor</span>
+   265→      </div>
+   266→      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+   267→        {NAV.map(n => {
+   268→          const I = n.icon; const a = page === n.id
+   269→          return <button key={n.id} onClick={() => { setPage(n.id); setSidebarOpen(false) }} className={cn('w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all', a ? 'bg-emerald-500/10 text-emerald-500' : 'text-slate-400 hover:bg-slate-800/70 hover:text-slate-200')}><I className={cn('h-5 w-5', a && 'text-emerald-500')} />{n.label}</button>
+   270→        })}
+   271→      </nav>
+   272→      <div className="border-t border-slate-700/50 p-4">
+   273→        <div className="flex items-center gap-3 mb-3">
+   274→          <Avatar className="h-9 w-9 bg-emerald-500/20 border border-emerald-500/30"><AvatarFallback className="text-emerald-400 text-sm font-semibold">{user?.username?.charAt(0).toUpperCase() || 'U'}</AvatarFallback></Avatar>
+   275→          <div className="flex-1 min-w-0">
+   276→            <p className="text-sm font-medium text-white truncate">{user?.username}</p>
+   277→            <Badge variant="secondary" className={cn('text-[10px] px-1.5 py-0', user?.role === 'admin' ? 'bg-amber-500/15 text-amber-400' : 'bg-slate-700/50 text-slate-400')}>{user?.role === 'admin' ? 'Admin' : 'Pengguna'}</Badge>
+   278→          </div>
+   279→        </div>
+   280→        <Button variant="ghost" size="sm" onClick={doLogout} className="w-full justify-start gap-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10"><LogOut className="h-4 w-4" />Keluar</Button>
+   281→      </div>
+   282→    </div>
+   283→  )
+   284→
+   285→  // ==================== AUTH ====================
+   286→  if (initLoad) return (
+   287→    <div className="min-h-screen bg-[#0f172a] flex items-center justify-center">
+   288→      <div className="text-center"><div className="w-16 h-16 rounded-2xl bg-emerald-500/20 flex items-center justify-center mx-auto mb-4"><BookOpen className="h-8 w-8 text-emerald-400 animate-pulse" /></div><p className="text-slate-400 text-sm">Memuat...</p></div>
+   289→    </div>
+   290→  )
+   291→
+   292→  if (!token || !user) return (
+   293→    <div className="min-h-screen bg-[#0f172a] flex items-center justify-center p-4">
+   294→      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm">
+   295→        <div className="text-center mb-8">
+   296→          <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 flex items-center justify-center mx-auto mb-4"><BookOpen className="h-8 w-8 text-emerald-400" /></div>
+   297→          <h1 className="text-2xl font-bold text-white">AI Library Tutor</h1>
+   298→          <p className="text-slate-400 mt-1 text-sm">Masuk untuk melanjutkan</p>
+   299→        </div>
+   300→        <Card className="bg-slate-800/50 border-slate-700/50"><CardContent className="pt-6">
+   301→          <form onSubmit={doLogin} className="space-y-4">
+   302→            <div className="space-y-2"><label className="text-sm font-medium text-slate-300">Username</label><Input value={loginU} onChange={e => setLoginU(e.target.value)} placeholder="Masukkan username" className="bg-slate-900/50 border-slate-600/50 text-white placeholder:text-slate-500 focus:border-emerald-500/50" /></div>
+   303→            <div className="space-y-2"><label className="text-sm font-medium text-slate-300">Password</label><Input type="password" value={loginP} onChange={e => setLoginP(e.target.value)} placeholder="Masukkan password" className="bg-slate-900/50 border-slate-600/50 text-white placeholder:text-slate-500 focus:border-emerald-500/50" /></div>
+   304→            <Button type="submit" disabled={loginLoad} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white">{loginLoad && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Masuk</Button>
+   305→          </form>
+   306→        </CardContent></Card>
+   307→      </motion.div>
+   308→    </div>
+   309→  )
+   310→
+   311→  // ==================== MAIN LAYOUT ====================
+   312→  return (
+   313→    <div className="flex h-screen bg-slate-950 text-white overflow-hidden">
+   314→      <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 bg-slate-900 border-r border-slate-700/50 z-30">{sidebar}</aside>
+   315→      <div className="flex-1 md:ml-64 flex flex-col min-h-screen">
+   316→        <header className="md:hidden flex items-center h-14 px-4 border-b border-slate-700/50 bg-slate-900/95 backdrop-blur-sm sticky top-0 z-20">
+   317→          <button onClick={() => setSidebarOpen(true)} className="p-2 -ml-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"><Menu className="h-5 w-5" /></button>
+   318→          <div className="flex items-center gap-2 ml-2"><BookOpen className="h-5 w-5 text-emerald-400" /><span className="text-base font-bold">AI Library Tutor</span></div>
+   319→        </header>
+   320→        <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+   321→          <SheetContent side="left" className="w-64 p-0 bg-slate-900 border-slate-700/50"><SheetTitle className="sr-only">Menu</SheetTitle>{sidebar}</SheetContent>
+   322→        </Sheet>
+   323→        <main className="flex-1 overflow-auto">
+   324→          <div className="p-4 md:p-6 lg:p-8">
+   325→            <AnimatePresence mode="wait"><motion.div key={page} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+   326→
+   327→              {/* DASHBOARD */}
+   328→              {page === 'dashboard' && (
+   329→                <div className="space-y-6">
+   330→                  <div><h1 className="text-2xl font-bold text-white">Selamat datang, {user.username}! 👋</h1><p className="text-slate-400 mt-1">Berikut ringkasan perpustakaan Anda.</p></div>
+   331→                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+   332→                    {[{ l: 'Total Buku', v: books.length, i: BookOpen }, { l: 'Percakapan AI', v: chats.length, i: MessageSquare }, { l: 'Aktivitas', v: activities.length, i: RefreshCw }].map((s, idx) => (
+   333→                      <Card key={idx} className="bg-slate-800/50 border-slate-700/50 hover:border-emerald-500/30 transition-colors"><CardContent className="p-5"><div className="flex items-center justify-between"><div><p className="text-sm text-slate-400">{s.l}</p><p className="text-3xl font-bold text-white mt-1">{actLoad ? <Skeleton className="h-8 w-12 bg-slate-700/50" /> : s.v}</p></div><div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center">{<s.i className="h-6 w-6 text-emerald-400" />}</div></div></CardContent></Card>
+   334→                    ))}
+   335→                  </div>
+   336→                  <div className="flex flex-wrap gap-3">
+   337→                    <Button onClick={() => { setPage('library'); setTimeout(() => setUploadOpen(true), 100) }} className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2"><Upload className="h-4 w-4" />Upload Buku</Button>
+   338→                    <Button onClick={() => setPage('chat')} variant="outline" className="border-slate-600/50 text-slate-300 hover:bg-slate-800 hover:text-white gap-2"><MessageSquare className="h-4 w-4" />Buat Chat</Button>
+   339→                    <Button onClick={() => setPage('search')} variant="outline" className="border-slate-600/50 text-slate-300 hover:bg-slate-800 hover:text-white gap-2"><Search className="h-4 w-4" />Cari</Button>
+   340→                  </div>
+   341→                  <Card className="bg-slate-800/50 border-slate-700/50"><CardHeader className="pb-3"><CardTitle className="text-white text-lg">Aktivitas Terbaru</CardTitle></CardHeader><CardContent>
+   342→                    {actLoad ? <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 rounded-lg bg-slate-700/30" />)}</div> :
+   343→                    activities.length === 0 ? <p className="text-slate-500 text-sm text-center py-6">Belum ada aktivitas.</p> :
+   344→                    <div className="space-y-2">{activities.slice(0, 10).map(a => {
+   345→                      const Ic = activityIcons[a.type] || BookOpen
+   346→                      return <div key={a.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-700/30 transition-colors"><div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0"><Ic className="h-4 w-4 text-emerald-400" /></div><p className="text-sm text-slate-300 truncate flex-1">{a.title}</p><span className="text-xs text-slate-500 flex-shrink-0">{a.createdAt ? format(new Date(a.createdAt), 'dd MMM, HH:mm') : ''}</span></div>
+   347→                    })}</div>}
+   348→                  </CardContent></Card>
+   349→                </div>
+   350→              )}
+   351→
+   352→              {/* LIBRARY */}
+   353→              {page === 'library' && (
+   354→                <div className="space-y-6">
+   355→                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+   356→                    <div><h1 className="text-2xl font-bold text-white">Perpustakaan</h1><p className="text-slate-400 text-sm mt-1">Kelola koleksi buku Anda.</p></div>
+   357→                    <Button onClick={() => setUploadOpen(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2 self-start"><Upload className="h-4 w-4" />Upload Buku</Button>
+   358→                  </div>
+   359→                  <div className="relative max-w-md">
+   360→                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+   361→                    <Input value={libSearch} onChange={e => setLibSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && fetchBooks(libSearch)} placeholder="Cari buku..." className="pl-9 bg-slate-800/50 border-slate-700/50 text-white placeholder:text-slate-500 focus:border-emerald-500/50" />
+   362→                  </div>
+   363→                  {booksLoad ? <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-44 rounded-xl bg-slate-800/50" />)}</div> :
+   364→                  books.length === 0 ? <Card className="bg-slate-800/50 border-slate-700/50"><CardContent className="flex flex-col items-center justify-center py-16"><div className="w-16 h-16 rounded-full bg-slate-700/30 flex items-center justify-center mb-4"><BookOpen className="h-8 w-8 text-slate-500" /></div><p className="text-slate-400 font-medium">Belum ada buku</p><p className="text-slate-500 text-sm mt-1">Upload buku pertama Anda.</p></CardContent></Card> :
+   365→                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{books.map(b => (
+   366→                    <Card key={b.id} className="bg-slate-800/50 border-slate-700/50 hover:border-emerald-500/30 transition-all group"><CardContent className="p-5">
+   367→                      <div className="flex items-start justify-between gap-2 mb-3"><div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center flex-shrink-0"><BookOpen className="h-5 w-5 text-emerald-400" /></div><Button variant="ghost" size="icon" onClick={() => doDeleteBook(b.id)} className="h-8 w-8 text-slate-500 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"><Trash2 className="h-4 w-4" /></Button></div>
+   368→                      <h3 className="text-sm font-semibold text-white truncate" title={b.title}>{b.title}</h3>
+   369→                      <p className="text-xs text-slate-400 mt-1 truncate">{b.author || 'Tidak diketahui'}</p>
+   370→                      <div className="flex items-center gap-2 mt-3"><Badge variant="secondary" className="text-[10px] bg-emerald-500/10 text-emerald-400">{b.fileType?.toUpperCase()}</Badge><span className="text-xs text-slate-500">{b.totalPages} hal</span><span className="text-xs text-slate-500">· {b._count.documents} dok</span></div>
+   371→                    </CardContent></Card>
+   372→                  ))}</div>}
+   373→                  <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+   374→                    <DialogContent className="bg-slate-800 border-slate-700/50 text-white sm:max-w-md">
+   375→                      <DialogHeader><DialogTitle>Upload Buku Baru</DialogTitle><DialogDescription className="text-slate-400">Pilih file dan masukkan detail buku.</DialogDescription></DialogHeader>
+   376→                      <div className="space-y-4 py-2">
+   377→                        <div className="space-y-2"><label className="text-sm font-medium text-slate-300">Judul *</label><Input value={upTitle} onChange={e => setUpTitle(e.target.value)} placeholder="Judul buku" className="bg-slate-900/50 border-slate-600/50 text-white placeholder:text-slate-500" /></div>
+   378→                        <div className="space-y-2"><label className="text-sm font-medium text-slate-300">Penulis</label><Input value={upAuthor} onChange={e => setUpAuthor(e.target.value)} placeholder="Nama penulis" className="bg-slate-900/50 border-slate-600/50 text-white placeholder:text-slate-500" /></div>
+   379→                        <div className="space-y-2"><label className="text-sm font-medium text-slate-300">File *</label>
+   380→                          <div onClick={() => fileRef.current?.click()} className="border-2 border-dashed border-slate-600/50 rounded-lg p-6 text-center cursor-pointer hover:border-emerald-500/50 transition-colors">
+   381→                            {upFile ? <div className="flex items-center justify-center gap-2"><FileText className="h-5 w-5 text-emerald-400" /><span className="text-sm text-slate-300 truncate max-w-[200px]">{upFile.name}</span><button onClick={e => { e.stopPropagation(); setUpFile(null) }} className="text-slate-500 hover:text-red-400"><X className="h-4 w-4" /></button></div> : <><Upload className="h-8 w-8 text-slate-500 mx-auto mb-2" /><p className="text-sm text-slate-400">Klik untuk memilih file</p><p className="text-xs text-slate-500 mt-1">TXT, MD, JSON, PDF</p></>}
+   382→                          </div>
+   383→                          <input ref={fileRef} type="file" accept=".txt,.md,.json,.pdf,.docx,.doc" onChange={e => { const f = e.target.files?.[0]; if (f) setUpFile(f) }} className="hidden" />
+   384→                        </div>
+   385→                      </div>
+   386→                      <DialogFooter><Button variant="outline" onClick={() => setUploadOpen(false)} className="border-slate-600/50 text-slate-300">Batal</Button><Button onClick={doUpload} disabled={uploading || !upFile || !upTitle.trim()} className="bg-emerald-600 hover:bg-emerald-500 text-white">{uploading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Upload</Button></DialogFooter>
+   387→                    </DialogContent>
+   388→                  </Dialog>
+   389→                </div>
+   390→              )}
+   391→
+   392→              {/* CHAT */}
+   393→              {page === 'chat' && (
+   394→                <div className="flex h-[calc(100vh-8rem)] -m-4 md:-m-6 overflow-hidden">
+   395→                  <div className={cn('w-full md:w-72 border-r border-slate-700/50 flex-shrink-0 flex flex-col bg-slate-900/30', selChat ? 'hidden md:flex' : 'flex')}>
+   396→                    <div className="p-4 border-b border-slate-700/50"><Button onClick={doNewChat} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white gap-2"><Plus className="h-4 w-4" />Percakapan Baru</Button></div>
+   397→                    <ScrollArea className="flex-1"><div className="p-2 space-y-1">
+   398→                      {chatsLoad ? Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 rounded-lg bg-slate-800/50" />) :
+   399→                      chats.length === 0 ? <div className="text-center py-8"><MessageSquare className="h-8 w-8 text-slate-600 mx-auto mb-2" /><p className="text-sm text-slate-500">Belum ada percakapan</p></div> :
+   400→                      chats.map(c => (
+   401→                        <button key={c.id} onClick={() => fetchMsgs(c.id)} className={cn('w-full text-left p-3 rounded-lg transition-all', selChat === c.id ? 'bg-emerald-500/10 border border-emerald-500/20' : 'hover:bg-slate-800/50 border border-transparent')}>
+   402→                          <p className="text-sm font-medium text-slate-200 truncate">{c.title}</p>
+   403→                          <p className="text-xs text-slate-500 mt-1">{c._count?.messages || 0} pesan{c.createdAt ? ` · ${format(new Date(c.createdAt), 'dd MMM')}` : ''}</p>
+   404→                        </button>
+   405→                      ))}
+   406→                    </div></ScrollArea>
+   407→                  </div>
+   408→                  <div className={cn('flex-1 flex flex-col bg-slate-950', selChat ? 'flex' : 'hidden md:flex')}>
+   409→                    {selChat ? (<>
+   410→                      <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-700/50 bg-slate-900/30">
+   411→                        <button onClick={() => setSelChat(null)} className="md:hidden text-slate-400 hover:text-white"><ArrowLeft className="h-5 w-5" /></button>
+   412→                        <div className="flex-1 min-w-0"><h2 className="text-sm font-semibold text-white truncate">{chatTitle}</h2><p className="text-xs text-slate-500">Percakapan AI</p></div>
+   413→                      </div>
+   414→                      <ScrollArea className="flex-1 p-4">
+   415→                        {msgsLoad ? <div className="space-y-4">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className={cn('h-16 rounded-xl max-w-[80%]', i % 2 === 0 ? 'ml-auto' : '')} />)}</div> :
+   416→                        msgs.length === 0 ? <div className="flex flex-col items-center justify-center h-full py-16"><div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mb-4"><Bot className="h-8 w-8 text-emerald-400" /></div><p className="text-slate-400 font-medium">Mulai percakapan</p><p className="text-slate-500 text-sm mt-1">Ketik pesan di bawah.</p></div> :
+   417→                        <div className="space-y-4">{msgs.map(m => {
+   418→                          const refs = parseRefs(m.references)
+   419→                          return <div key={m.id} className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
+   420→                            <div className={cn('max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-3', m.role === 'user' ? 'bg-emerald-600 text-white rounded-br-md' : 'bg-slate-800 text-slate-200 rounded-bl-md')}>
+   421→                              {m.role === 'assistant' && <div className="flex items-center gap-2 mb-2"><Bot className="h-4 w-4 text-emerald-400" /><span className="text-xs font-medium text-emerald-400">AI Tutor</span></div>}
+   422→                              <div className="text-sm prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5"><ReactMarkdown>{m.content}</ReactMarkdown></div>
+   423→                              {refs.length > 0 && <div className="mt-3 pt-3 border-t border-slate-700/50">
+   424→                                <button onClick={() => toggleRef(m.id)} className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300">{expRefs[m.id] ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}Referensi ({refs.length})</button>
+   425→                                {expRefs[m.id] && <div className="mt-2 space-y-2">{refs.map((r, i) => <div key={i} className="bg-slate-900/50 rounded-lg p-3 border border-slate-700/30"><p className="text-xs font-medium text-emerald-400 truncate">{r.bookTitle}</p><Badge variant="secondary" className="text-[10px] bg-slate-700/50 text-slate-400 mt-1">Hal. {r.page}</Badge><p className="text-xs text-slate-400 mt-1 line-clamp-3">{r.content}</p></div>)}</div>}
+   426→                              </div>}
+   427→                            </div>
+   428→                          </div>})}
+   429→                        {sending && <div className="flex justify-start"><div className="bg-slate-800 rounded-2xl rounded-bl-md px-4 py-3"><div className="flex items-center gap-2"><Loader2 className="h-4 w-4 text-emerald-400 animate-spin" /><span className="text-sm text-slate-400">Berpikir...</span></div></div></div>}
+   430→                        <div ref={endRef} /></div>}
+   431→                      </ScrollArea>
+   432→                      <div className="p-4 border-t border-slate-700/50 bg-slate-900/30"><div className="flex gap-2">
+   433→                        <Input value={chatIn} onChange={e => setChatIn(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend() } }} placeholder="Ketik pesan..." disabled={sending} className="flex-1 bg-slate-800/50 border-slate-700/50 text-white placeholder:text-slate-500 focus:border-emerald-500/50" />
+   434→                        <Button onClick={doSend} disabled={!chatIn.trim() || sending} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4"><Send className="h-4 w-4" /></Button>
+   435→                      </div></div>
+   436→                    </>) : (
+   437→                      <div className="flex-1 flex items-center justify-center"><div className="text-center"><div className="w-20 h-20 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-4"><MessageSquare className="h-10 w-10 text-emerald-400/50" /></div><p className="text-slate-400 font-medium">Pilih atau buat percakapan</p></div></div>
+   438→                    )}
+   439→                  </div>
+   440→                </div>
+   441→              )}
+   442→
+   443→              {/* SEARCH */}
+   444→              {page === 'search' && (
+   445→                <div className="space-y-6">
+   446→                  <div><h1 className="text-2xl font-bold text-white">Pencarian</h1><p className="text-slate-400 text-sm mt-1">Cari konten dari buku.</p></div>
+   447→                  <div className="flex gap-2 max-w-2xl"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" /><Input value={searchQ} onChange={e => setSearchQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && doSearch()} placeholder="Masukkan kata kunci..." className="pl-9 bg-slate-800/50 border-slate-700/50 text-white placeholder:text-slate-500 focus:border-emerald-500/50" /></div><Button onClick={doSearch} disabled={searching} className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2">{searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}Cari</Button></div>
+   448→                  {searching ? <div className="space-y-4">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl bg-slate-800/50" />)}</div> :
+   449→                  searched && searchRes.length === 0 ? <Card className="bg-slate-800/50 border-slate-700/50"><CardContent className="flex flex-col items-center py-16"><Search className="h-10 w-10 text-slate-600 mb-3" /><p className="text-slate-400">Tidak ada hasil</p></CardContent></Card> :
+   450→                  <div className="space-y-3">{searchRes.map((r, i) => <Card key={i} className="bg-slate-800/50 border-slate-700/50 hover:border-emerald-500/30 transition-colors"><CardContent className="p-4"><div className="flex items-center gap-2 mb-1"><BookOpen className="h-4 w-4 text-emerald-400" /><h3 className="text-sm font-semibold text-white truncate">{r.bookTitle}</h3><Badge variant="secondary" className="text-[10px] bg-slate-700/50 text-slate-400">Hal. {r.page}</Badge></div><p className="text-sm text-slate-400 line-clamp-3">{r.content}</p></CardContent></Card>)}</div>}
+   451→                </div>
+   452→              )}
+   453→
+   454→              {/* SUMMARY */}
+   455→              {page === 'summary' && (
+   456→                <div className="space-y-6">
+   457→                  <div><h1 className="text-2xl font-bold text-white">Ringkasan</h1><p className="text-slate-400 text-sm mt-1">Buat ringkasan otomatis dari buku.</p></div>
+   458→                  <Card className="bg-slate-800/50 border-slate-700/50"><CardContent className="p-5 space-y-4">
+   459→                    <div className="space-y-2"><label className="text-sm font-medium text-slate-300">Pilih Buku</label>
+   460→                      {booksLoad ? <Skeleton className="h-10 rounded-lg bg-slate-700/50" /> :
+   461→                      <Select value={sumBook} onValueChange={setSumBook}><SelectTrigger className="bg-slate-900/50 border-slate-600/50 text-white"><SelectValue placeholder="Pilih buku..." /></SelectTrigger><SelectContent className="bg-slate-800 border-slate-700">{books.map(b => <SelectItem key={b.id} value={b.id}>{b.title}</SelectItem>)}{books.length === 0 && <div className="px-2 py-3 text-sm text-slate-500 text-center">Tidak ada buku</div>}</SelectContent></Select>}
+   462→                    </div>
+   463→                    <Button onClick={doSummary} disabled={sumLoad || !sumBook} className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2">{sumLoad ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Buat Ringkasan</Button>
+   464→                  </CardContent></Card>
+   465→                  {sumLoad && <Card className="bg-slate-800/50 border-slate-700/50"><CardContent className="p-8 flex flex-col items-center"><Loader2 className="h-8 w-8 text-emerald-400 animate-spin mb-3" /><p className="text-slate-400">Membuat ringkasan...</p></CardContent></Card>}
+   466→                  {sumResult && !sumLoad && <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}><Card className="bg-slate-800/50 border-slate-700/50"><CardHeader className="pb-3"><CardTitle className="text-white text-lg flex items-center gap-2"><FileText className="h-5 w-5 text-emerald-400" />Ringkasan</CardTitle></CardHeader><CardContent><div className="text-sm text-slate-300 prose prose-invert prose-sm max-w-none"><ReactMarkdown>{sumResult}</ReactMarkdown></div></CardContent></Card></motion.div>}
+   467→                </div>
+   468→              )}
+   469→
+   470→              {/* QUIZ */}
+   471→              {page === 'quiz' && (
+   472→                <div className="space-y-6">
+   473→                  <div><h1 className="text-2xl font-bold text-white">Pembuat Soal</h1><p className="text-slate-400 text-sm mt-1">Buat soal dari buku secara otomatis.</p></div>
+   474→                  <Card className="bg-slate-800/50 border-slate-700/50"><CardContent className="p-5 space-y-4">
+   475→                    <div className="space-y-2"><label className="text-sm font-medium text-slate-300">Pilih Buku</label>
+   476→                      {booksLoad ? <Skeleton className="h-10 rounded-lg" /> :
+   477→                      <Select value={qBook} onValueChange={setQBook}><SelectTrigger className="bg-slate-900/50 border-slate-600/50 text-white"><SelectValue placeholder="Pilih buku..." /></SelectTrigger><SelectContent className="bg-slate-800 border-slate-700">{books.map(b => <SelectItem key={b.id} value={b.id}>{b.title}</SelectItem>)}</SelectContent></Select>}
+   478→                    </div>
+   479→                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+   480→                      <div className="space-y-2"><label className="text-sm font-medium text-slate-300">Tipe</label><Select value={qType} onValueChange={setQType}><SelectTrigger className="bg-slate-900/50 border-slate-600/50 text-white"><SelectValue /></SelectTrigger><SelectContent className="bg-slate-800 border-slate-700"><SelectItem value="pilihan_ganda">Pilihan Ganda</SelectItem><SelectItem value="esai">Esai</SelectItem></SelectContent></Select></div>
+   481→                      <div className="space-y-2"><label className="text-sm font-medium text-slate-300">Jumlah</label><Select value={qCount} onValueChange={setQCount}><SelectTrigger className="bg-slate-900/50 border-slate-600/50 text-white"><SelectValue /></SelectTrigger><SelectContent className="bg-slate-800 border-slate-700">{[3,4,5,6,7,8,9,10].map(n => <SelectItem key={n} value={String(n)}>{n} soal</SelectItem>)}</SelectContent></Select></div>
+   482→                      <div className="space-y-2"><label className="text-sm font-medium text-slate-300">Kesulitan</label><Select value={qDiff} onValueChange={setQDiff}><SelectTrigger className="bg-slate-900/50 border-slate-600/50 text-white"><SelectValue /></SelectTrigger><SelectContent className="bg-slate-800 border-slate-700"><SelectItem value="mudah">Mudah</SelectItem><SelectItem value="sedang">Sedang</SelectItem><SelectItem value="sulit">Sulit</SelectItem></SelectContent></Select></div>
+   483→                    </div>
+   484→                    <Button onClick={doQuiz} disabled={qLoad || !qBook} className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2">{qLoad ? <Loader2 className="h-4 w-4 animate-spin" /> : <HelpCircle className="h-4 w-4" />}Buat Soal</Button>
+   485→                  </CardContent></Card>
+   486→                  {qLoad && <Card className="bg-slate-800/50 border-slate-700/50"><CardContent className="p-8 flex flex-col items-center"><Loader2 className="h-8 w-8 text-emerald-400 animate-spin mb-3" /><p className="text-slate-400">Membuat soal...</p></CardContent></Card>}
+   487→                  {qResult && !qLoad && <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}><Card className="bg-slate-800/50 border-slate-700/50"><CardHeader className="pb-3"><CardTitle className="text-white text-lg flex items-center gap-2"><HelpCircle className="h-5 w-5 text-emerald-400" />Soal</CardTitle></CardHeader><CardContent><div className="text-sm text-slate-300 prose prose-invert prose-sm max-w-none"><ReactMarkdown>{qResult}</ReactMarkdown></div></CardContent></Card></motion.div>}
+   488→                </div>
+   489→              )}
+   490→
+   491→              {/* SETTINGS */}
+   492→              {page === 'settings' && (
+   493→                <div className="space-y-6 max-w-2xl">
+   494→                  <div><h1 className="text-2xl font-bold text-white">Pengaturan</h1><p className="text-slate-400 text-sm mt-1">Kelola akun dan preferensi.</p></div>
+   495→                  <Card className="bg-slate-800/50 border-slate-700/50"><CardHeader><CardTitle className="text-white text-lg">Informasi Akun</CardTitle></CardHeader><CardContent><div className="flex items-center gap-4"><Avatar className="h-16 w-16 bg-emerald-500/20 border-2 border-emerald-500/30"><AvatarFallback className="text-emerald-400 text-xl font-bold">{user.username.charAt(0).toUpperCase()}</AvatarFallback></Avatar><div><h3 className="text-lg font-semibold text-white">{user.username}</h3><Badge variant="secondary" className={cn('mt-1', user.role === 'admin' ? 'bg-amber-500/15 text-amber-400' : 'bg-slate-700/50 text-slate-400')}>{user.role === 'admin' ? 'Admin' : 'Pengguna'}</Badge></div></div></CardContent></Card>
+   496→                  <Card className="bg-slate-800/50 border-slate-700/50"><CardHeader><CardTitle className="text-white text-lg">Tema</CardTitle></CardHeader><CardContent><div className="flex items-center justify-between"><div className="flex items-center gap-3">{theme === 'dark' ? <Moon className="h-5 w-5 text-emerald-400" /> : <Sun className="h-5 w-5 text-amber-400" />}<div><p className="text-sm font-medium text-white">Mode Gelap</p><p className="text-xs text-slate-400">{theme === 'dark' ? 'Tema gelap aktif' : 'Tema terang aktif'}</p></div></div><Switch checked={theme === 'dark'} onCheckedChange={c => setTheme(c ? 'dark' : 'light')} /></div></CardContent></Card>
+   497→                  {user.role === 'admin' && <Card className="bg-slate-800/50 border-slate-700/50"><CardHeader><CardTitle className="text-white text-lg flex items-center gap-2"><User className="h-5 w-5 text-emerald-400" />Buat Pengguna Baru</CardTitle></CardHeader><CardContent className="space-y-4"><div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><div className="space-y-2"><label className="text-sm font-medium text-slate-300">Username</label><Input value={newU} onChange={e => setNewU(e.target.value)} placeholder="Username baru" className="bg-slate-900/50 border-slate-600/50 text-white placeholder:text-slate-500" /></div><div className="space-y-2"><label className="text-sm font-medium text-slate-300">Password</label><Input type="password" value={newP} onChange={e => setNewP(e.target.value)} placeholder="Password baru" className="bg-slate-900/50 border-slate-600/50 text-white placeholder:text-slate-500" /></div></div><div className="space-y-2"><label className="text-sm font-medium text-slate-300">Peran</label><Select value={newR} onValueChange={setNewR}><SelectTrigger className="bg-slate-900/50 border-slate-600/50 text-white"><SelectValue /></SelectTrigger><SelectContent className="bg-slate-800 border-slate-700"><SelectItem value="pengguna">Pengguna</SelectItem><SelectItem value="admin">Admin</SelectItem></SelectContent></Select></div><Button onClick={doCreateUser} disabled={creating || !newU.trim() || !newP.trim()} className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2">{creating && <Loader2 className="h-4 w-4 animate-spin" />}Buat Pengguna</Button></CardContent></Card>}
+   498→                </div>
+   499→              )}
+   500→
+   501→            </motion.div></AnimatePresence>
+   502→          </div>
+   503→        </main>
+   504→      </div>
+   505→    </div>
+   506→  )
+   507→}

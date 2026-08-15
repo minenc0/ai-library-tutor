@@ -118,7 +118,18 @@ export default function AILibraryTutor() {
     })()
   }, [])
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
+  const chatContainerRef = useRef<HTMLDivElement>(null)
+
+  const scrollToBottom = (smooth = true) => {
+    if (endRef.current) {
+      endRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant' })
+    }
+  }
+
+  useEffect(() => { scrollToBottom() }, [msgs, sending])
+  useEffect(() => {
+    if (msgs.length > 0) scrollToBottom(false)
+  }, [selChat])
 
   const fetchDash = async () => {
     setActLoad(true); setBooksLoad(true); setChatsLoad(true)
@@ -411,7 +422,7 @@ export default function AILibraryTutor() {
                         <button onClick={() => setSelChat(null)} className="md:hidden text-slate-400 hover:text-white"><ArrowLeft className="h-5 w-5" /></button>
                         <div className="flex-1 min-w-0"><h2 className="text-sm font-semibold text-white truncate">{chatTitle}</h2><p className="text-xs text-slate-500">Percakapan AI</p></div>
                       </div>
-                      <ScrollArea className="flex-1 p-4">
+                      <div className="flex-1 overflow-y-auto p-4">
                         {msgsLoad ? <div className="space-y-4">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className={cn('h-16 rounded-xl max-w-[80%]', i % 2 === 0 ? 'ml-auto' : '')} />)}</div> :
                         msgs.length === 0 ? <div className="flex flex-col items-center justify-center h-full py-16"><div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mb-4"><Bot className="h-8 w-8 text-emerald-400" /></div><p className="text-slate-400 font-medium">Mulai percakapan</p><p className="text-slate-500 text-sm mt-1">Ketik pesan di bawah.</p></div> :
                         <div className="space-y-4">{msgs.map(m => {
@@ -428,7 +439,7 @@ export default function AILibraryTutor() {
                           </div>})}
                         {sending && <div className="flex justify-start"><div className="bg-slate-800 rounded-2xl rounded-bl-md px-4 py-3"><div className="flex items-center gap-2"><Loader2 className="h-4 w-4 text-emerald-400 animate-spin" /><span className="text-sm text-slate-400">Berpikir...</span></div></div></div>}
                         <div ref={endRef} /></div>}
-                      </ScrollArea>
+                      </div>
                       <div className="p-4 border-t border-slate-700/50 bg-slate-900/30"><div className="flex gap-2">
                         <Input value={chatIn} onChange={e => setChatIn(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend() } }} placeholder="Ketik pesan..." disabled={sending} className="flex-1 bg-slate-800/50 border-slate-700/50 text-white placeholder:text-slate-500 focus:border-emerald-500/50" />
                         <Button onClick={doSend} disabled={!chatIn.trim() || sending} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4"><Send className="h-4 w-4" /></Button>
