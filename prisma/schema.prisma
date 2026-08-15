@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  role      String   @default("user")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  books     Book[]
+  chats    Chat[]
+  activities Activity[]
+}
+
+model Book {
+  id          String     @id @default(cuid())
+  title       String
+  author      String?
+  filename    String
+  fileSize    Int
+  fileType    String
+  totalPages  Int        @default(1)
+  status      String     @default("processing")
+  errorMessage String?
+  userId      String
+  user        User       @relation(fields: [userId], references: [id])
+  documents   Document[]
+  chats      Chat[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  content   String
+  page      Int      @default(1)
+  chunkIndex Int     @default(0)
+  bookId    String
+  book      Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model Chat {
+  id        String    @id @default(cuid())
+  title     String
+  bookId    String?
+  book      Book?     @relation(fields: [bookId], references: [id])
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Message {
+  id         String   @id @default(cuid())
+  role       String
+  content    String
+  references String?
+  chatId     String
+  chat       Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  type      String
+  title     String
+  details   String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+}
